@@ -4,10 +4,12 @@ import org.openqa.selenium.chrome.ChromeDriver
 import org.openqa.selenium.chrome.ChromeOptions
 import org.openqa.selenium.support.ui.ExpectedConditions
 import org.openqa.selenium.support.ui.WebDriverWait
+import java.nio.file.Files
+import java.nio.file.Paths
 import java.time.Duration
 
 object VRCWorldFinder {
-    private val worldIds: MutableSet<String> = HashSet()
+    private val worldIds: HashMap<String, HashSet<String>> = HashMap()
     private val driver by lazy {
         val chromeOptions = ChromeOptions().apply {
 //            addArguments("--headless=new")
@@ -27,6 +29,7 @@ object VRCWorldFinder {
             System.setProperty("webdriver.chrome.driver", "D:\\Downloads\\Chromedriver\\chromedriver.exe")
             login()
             getWorlds()
+            saveWorlds()
         } finally {
             driver.quit()
         }
@@ -56,32 +59,54 @@ object VRCWorldFinder {
         wait.until {
             ExpectedConditions.visibilityOfAllElementsLocatedBy(By.cssSelector("div.world-row"))
         }
-        val worldRows = driver.findElements(By.cssSelector("div.world-row"))
+        val worldRows = driver.findElements(By.cssSelector("div.row > div > div"))
+        val nextButtons = HashSet<WebElement>()
+        val worldIdsSize = HashMap<String, Int>()
+        val stayedCount = HashMap<String, Int>()
+        val checkingWorldRow = HashMap<String, Boolean>()
         for (worldRow in worldRows) {
-            getWorlds(worldRow)
+            val bucketName = worldRow.findElement(By.cssSelector("h4")).text
+            worldIds[bucketName] = HashSet()
+            nextButtons.add(worldRow.findElement(By.cssSelector("div.right-world-nav")))
+            val worlds = worldRow.findElements(By.cssSelector("div.world-list > div.world > a"))
+            worldIds[bucketName]!!.addAll(worlds.map { it.getAttribute("href").substringAfter("/home/world/") })
+            worldIdsSize[bucketName] = worldIds[bucketName]!!.size
+            stayedCount[bucketName] = 0
+            checkingWorldRow[bucketName] = true
         }
+        var i = 0
+        do {
+            for (worldRow in worldRows) {
+                val bucketName = worldRow.findElement(By.cssSelector("h4")).text
+                if (checkingWorldRow[bucketName]!!) {
+                    val bucket = worldIds[bucketName]!!
+                    val worlds = worldRow.findElements(By.cssSelector("div.world-list > div.world > a"))
+                    for (world in worlds) {
+                        bucket.add(world.getAttribute("href").substringAfter("/home/world/"))
+                    }
+                    if (bucket.size == worldIdsSize[bucketName]) {
+                        stayedCount[bucketName]!!.plus(1)
+                        if (stayedCount[bucketName]!! > 2) {
+                            checkingWorldRow[bucketName] = false
+                        }
+                    } else {
+                        stayedCount[bucketName] = 0
+                    }
+                    worldIdsSize[bucketName] = worldIds[bucketName]!!.size
+                }
+            }
+            for (button in nextButtons) {
+                button.click()
+            }
+            Thread.sleep(2000)
+            println("Finished iteration: ${i++}")
+        } while (i < 25)
     }
 
-    private fun getWorlds(worldRow: WebElement) {
-        val nextButton = worldRow.findElement(By.cssSelector("div.right-world-nav"))
-        var worlds = worldRow.findElements(By.cssSelector("div.world-list > div.world > a"))
-        worldIds.addAll(worlds.map { it.getAttribute("href").substringAfter("/home/world/") })
-        var worldIdsSize = worldIds.size
-        var stayedCount = 0
-        for (i in 0 until 50) {
-            nextButton.click()
-            Thread.sleep(2000)
-            worlds = worldRow.findElements(By.cssSelector("div.world-list > div.world > a"))
-            worldIds.addAll(worlds.map { it.getAttribute("href").substringAfter("/home/world/") })
-            if (worldIds.size == worldIdsSize) {
-                stayedCount++
-                if (stayedCount > 2) {
-                    break
-                }
-            } else {
-                stayedCount = 0
-            }
-            worldIdsSize = worldIds.size
+    private fun saveWorlds() {
+        for (bucket in worldIds) {
+            val idFile = Paths.get("${bucket.key}/ids.txt")
+            Files.write(idFile, bucket.value)
         }
     }
 }
